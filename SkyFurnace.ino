@@ -11,6 +11,7 @@
 #include "Settings.h"
 #include "Melexis.h"
 #include "DataLink.h"
+#include "filter.h"
 
 #ifndef MAX6675_H
 #define MAX6675_H
@@ -20,6 +21,9 @@
 // Note: this is using a modified MAX6675 library.  The .h file has been modified to include the typical #ifndef...#endif wrapper
 
 #define FIRMWARE_VERSION "0.01"
+
+//#define STEPPER_DRIVER_FREQ 1100
+#define STEPPER_DRIVER_FREQ 1200
 
 // stepper steps per revolution = (motor's intrinsic steps per revolution) * (microstepping)
 #define STEPPER_ELEV_STEPS_PER_REV 200.0 * 1.0
@@ -125,9 +129,7 @@ void configureTimerInterrupt() {
   TCCR1A = 0;
   TCCR1B = 0;
   TCNT1 = 0;
-  //OCR1A = 1999;
-  OCR1A = 1100;
-  //OCR1A = 999;
+  OCR1A = STEPPER_DRIVER_FREQ;
   TCCR1B |= (1 << WGM12);
   TCCR1B |= (1 << CS11);
   TIMSK1 |= (1 << OCIE1A);

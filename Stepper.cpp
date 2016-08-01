@@ -163,9 +163,36 @@ void Stepper::run(float dt) {
 				velocity = max(velocity, -softLimitVelocityBackPercent * maxVelocity);
 				if (!runningBackward) velocity = 0;
 			}
+      
+			// update our position by adding the current velocity and dt
+			position += velocity * dt;
+      
+			// apply to motor
+			if (position - motorPosition > 5 && runningForward) {
+				digitalWrite(pinStep, 0);
+				digitalWrite(pinDir, 1);
+				pulseActive = true;
+				motorPosition += 10;
+        lastStepAge = 0;
+				if (position - motorPosition > 10) {
+				  position = motorPosition;
+				}
+			}
+			else if (motorPosition - position > 5 && runningBackward) {
+				digitalWrite(pinStep, 0);
+				digitalWrite(pinDir, 0);
+				pulseActive = true;
+				motorPosition -= 10;
+        lastStepAge = 0;
+				if (motorPosition - position > 10) {
+				  position = motorPosition;
+				}
+			}
 
-      motorsMoving[myID] = velocity != 0;
-
+      // figure out if ALL motors are still and we can depower the stepper driver
+      motorsMoving[myID] = velocity != 0 && lastStepAge < 100;
+      if (lastStepAge < 100) lastStepAge++;
+      
       if (motorsMoving[0] || motorsMoving[1] || motorsMoving[2]) {
         if (lastEnabledState == 0) {
           digitalWrite(PIN_STEPPER_ELEV_ENABLE, !running);
@@ -182,29 +209,6 @@ void Stepper::run(float dt) {
           lastEnabledState = 0;
         }
       }
-      
-			// update our position by adding the current velocity and dt
-			position += velocity * dt;
-
-			// apply to motor
-			if (position - motorPosition > 5 && runningForward) {
-				digitalWrite(pinStep, 0);
-				digitalWrite(pinDir, 1);
-				pulseActive = true;
-				motorPosition += 10;
-				if (position - motorPosition > 10) {
-				  position = motorPosition;
-				}
-			}
-			else if (motorPosition - position > 5 && runningBackward) {
-				digitalWrite(pinStep, 0);
-				digitalWrite(pinDir, 0);
-				pulseActive = true;
-				motorPosition -= 10;
-				if (motorPosition - position > 10) {
-				  position = motorPosition;
-				}
-			}
 		}
 	}
 }

@@ -3,6 +3,7 @@
 
 #include "Arduino.h"
 
+#define DATALINK_NUM_VALUES 12
 class DataLink {
 
 public:
@@ -12,7 +13,7 @@ public:
 
 private:
   String encode(int data[]);
-  int values[8];
+  int values[DATALINK_NUM_VALUES];
   HardwareSerial *sp;
 
 };

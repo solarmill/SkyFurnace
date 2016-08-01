@@ -155,10 +155,6 @@ void GPS::processBuffer() {
       day = GPSbuffer.substring(0, 2).toInt();
       month = GPSbuffer.substring(2, 4).toInt();
       year = 2000 + GPSbuffer.substring(4, 6).toInt();
-      Serial.println(GPSbuffer);
-      Serial.println(day);
-      Serial.println(month);
-      Serial.println(year);
     }
   }
 }

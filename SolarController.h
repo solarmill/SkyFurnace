@@ -1,6 +1,10 @@
 #ifndef _SOLARCONTROLLER_h
 #define _SOLARCONTROLLER_h
 
+#define MAIN_LOOP_FREQ 100
+
+class SolarController;
+
 #include "Arduino.h"
 #include "Display.h"
 #include "Stepper.h"
@@ -9,6 +13,7 @@
 #include "Menu.h"
 #include "Melexis.h"
 #include "DataLink.h"
+#include "filter.h"
 #include <EEPROM.h>
 
 #ifndef MAX6675_H
@@ -41,9 +46,9 @@
 //#define FOCUS_D_COEFF 15.0
 
 // settings for iron kettle
-#define FOCUS_P_COEFF 4.0
-#define FOCUS_I_COEFF 0.0
-#define FOCUS_D_COEFF 15.0
+//#define FOCUS_P_COEFF 4.0
+//#define FOCUS_I_COEFF 0.0
+//#define FOCUS_D_COEFF 15.0
 
 class SolarController {
 
@@ -54,8 +59,25 @@ public:
   void setHomeElev();
   void setHomeFocus();
   void setIRTempExists(bool value);
+  float loadPIDP();
+  float loadPIDI();
+  float loadPIDD();
+  float loadPIDInputCutoff();
+  float loadPIDDCutoff();
+  void savePIDP(float value);
+  void savePIDI(float value);
+  void savePIDD(float value);
+  void savePIDInputCutoff(float value);
+  void savePIDDCutoff(float value);
   
 private:
+
+  float pCoeff = 0;
+  float iCoeff = 0;
+  float dCoeff = 0;
+  float inputCutoff = 0;
+  float dCutoff = 0;
+  
   Menu *menu;
 	Display *displaypanel;
 	Stepper *stepper_elev;
@@ -65,6 +87,8 @@ private:
   MAX6675 *thermocouple;
   MelexisTempProbe *irProbe;
   DataLink *datalink;
+  biquad_t inputFilter;
+  biquad_t dFilter;
   
 	bool isSetup = false;
 

@@ -99,6 +99,7 @@ private:
 	float stepsPerDegree;
 	long motorPosition = 0;
 	long position = 0;
+  int lastStepAge = 0;
 	float velocity = 0;
 	float softLimitVelocityBackPercent = 1;
 	float softLimitVelocityForwardPercent = 1;

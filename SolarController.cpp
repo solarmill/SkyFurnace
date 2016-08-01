@@ -3,12 +3,13 @@
 #include "Menu.h"
 #include "Settings.h"
 #include "DataLink.h"
+#include "filter.h"
 
 void SolarController::setup(Display *_displaypanel, Stepper *_stepper_elev, Stepper *_stepper_focus_left, Stepper *_stepper_focus_right, GPS *_gps, MAX6675 *_thermocouple,  MelexisTempProbe *_irProbe, DataLink *_datalink) {
 
   displaypanel = _displaypanel;
   menu = new Menu();
-  menu->setup(_displaypanel, stepper_elev, stepper_focus_left, stepper_focus_right, _gps, thermocouple);
+  menu->setup(_displaypanel, stepper_elev, stepper_focus_left, stepper_focus_right, _gps, thermocouple, this);
 
 	stepper_elev = _stepper_elev;
 	stepper_focus_left = _stepper_focus_left;
@@ -26,6 +27,12 @@ void SolarController::setup(Display *_displaypanel, Stepper *_stepper_elev, Step
     stepper_focus_left->setCurrentAngle(loadFocus());
     stepper_focus_right->setCurrentAngle(loadFocus());
   }
+
+  loadPIDP();
+  loadPIDI();
+  loadPIDD();
+  loadPIDInputCutoff();
+  loadPIDDCutoff();
 }
 
 void SolarController::khz() {
@@ -49,10 +56,18 @@ void SolarController::setHomeFocus() {
 void SolarController::run() {
   static unsigned long runcount = 0;
   static unsigned long lastruncount = 0;
+  static unsigned long lastSecond = 0;
   static bool gotThermalSample;
+  static int loopsPerSecond = 0;
+  static double nextStartTime = 0;
     
 	while (true) {
 
+    while (millis() < nextStartTime) { 
+      // wait
+    }
+    nextStartTime += 1000.0 / MAIN_LOOP_FREQ;
+    
     setPinOverride(PIN_FOCUS_LEFT, homingFocus);
     setPinOverride(PIN_ELEV_LEFT, homingElev);
 
@@ -67,19 +82,25 @@ void SolarController::run() {
       case 1: tempCurrent = tempIR; break;
       case 2: tempCurrent = (tempThermocouple + tempIR) / 2.0; break;
     }
+
+    tempCurrent = applyBiQuadFilter(tempCurrent, &inputFilter);
+      
     doTempSetPointAdjustments();
 
     doModeSwitches();
 
-    doTemperatureControl(gotThermalSample);
+    doTemperatureControl(gotThermalSample || tempSource != 0 /* not thermocouple-controlled */);
 
     doElevationControl();
 
     // other values set in PID controller
-    datalink->setValue(5, stepper_focus_left->getAngle() * 100);
-    datalink->setValue(6, tempCurrent * 100);
-    datalink->setValue(7, stepper_elev->getAngle() * 100);
-    
+    datalink->setValue(5, stepper_focus_left->getAngle() * 10);
+    datalink->setValue(6, tempCurrent * 10);
+    datalink->setValue(7, (ELEV_HOME_ANGLE - stepper_elev->getAngle()) * 10);
+    datalink->setValue(8, tempSetPoint * 10);
+    datalink->setValue(9, tempThermocouple * 10);
+    datalink->setValue(10, tempIR * 10);
+    datalink->setValue(11, loopsPerSecond);    
     
     runcount++;
 		if (millis() - lastDisplayTime > DISPLAY_REFRESH_INTERVAL_MS / 4) {
@@ -87,10 +108,13 @@ void SolarController::run() {
     
 			updateDisplay();    
 			lastDisplayTime = millis();
-      //Serial.print("Loops per interval: ");
-      //Serial.println(runcount - lastruncount);
-      lastruncount = runcount;
 		}
+   
+    if (millis() - lastSecond > 1000) {
+      lastSecond = millis();
+      loopsPerSecond = runcount - lastruncount;
+      lastruncount = runcount;
+    }
 	}
 }
 
@@ -110,10 +134,14 @@ void SolarController::doElevationControl() {
         Serial.println(autoElevOffset);
         Serial.print("CalcSunElev=");
         Serial.println(calcSunElev());
-        float newTargetAngle = ELEV_HOME_ANGLE - calcSunElev() + autoElevOffset;
+        Serial.print("ELEV_HOME_ANGLE=");
+        Serial.println(ELEV_HOME_ANGLE);
+        float newTargetAngle = ELEV_HOME_ANGLE - (90 - calcSunElev()) + autoElevOffset;
         Serial.print("newTargetAngle=");
         Serial.println(newTargetAngle);
-        stepper_elev->gotoAngle(ELEV_HOME_ANGLE - newTargetAngle);
+        Serial.print("applied angle: ");
+        Serial.println( ELEV_HOME_ANGLE - newTargetAngle);
+        stepper_elev->gotoAngle( ELEV_HOME_ANGLE - newTargetAngle);
         lastElevTime = millis();
       }
     }
@@ -136,29 +164,25 @@ void SolarController::doElevationControl() {
 
 void SolarController::doTemperatureControl(bool gotSample) {
   float err = (tempSetPoint - tempCurrent) * 0.01 /* dt */;
+  
   digitalWrite(PIN_LED_TEMP_DOWN, err > -0.01);
   digitalWrite(PIN_LED_TEMP_UP, err < 0.01);
 
   if (autoFocus) {
     if (gotSample) {
-      float P = err * FOCUS_P_COEFF;
+      float P = err * pCoeff;
       if (err != NAN) ISum += err;
-      float I = ISum * FOCUS_I_COEFF;
-      float D = (err - lastD) * FOCUS_D_COEFF;
+      float I = ISum * iCoeff;
+      float dInput = (err - lastD) / (1.0 / MAIN_LOOP_FREQ);
       lastD = err;
+      dInput = applyBiQuadFilter(dInput, &dFilter);
+      float D = dInput * dCoeff;
       float PID = P + I + D;
-      datalink->setValue(0, P * 100);
-      datalink->setValue(1, I * 100);
-      datalink->setValue(2, D * 100);
-      datalink->setValue(3, err * 100);
-      datalink->setValue(4, PID * 100);
-//      Serial.print(" err="); Serial.print(err);
-//      Serial.print(" p="); Serial.print(P);
-//      Serial.print(" i="); Serial.print(I);
-//      Serial.print(" d="); Serial.print(D);
-//      Serial.print(" pid="); Serial.print(PID);
-//      Serial.print(" derr="); Serial.print(err - lastD);
-//      Serial.print(" isum="); Serial.println(ISum);
+      datalink->setValue(0, P * 10);
+      datalink->setValue(1, I * 10);
+      datalink->setValue(2, D * 10);
+      datalink->setValue(3, err * 10);
+      datalink->setValue(4, PID * 10);
       
       float target = stepper_focus_left->getAngle() + PID;
         target = min(min(focusSetMaxExtension, FOCUS_SOFT_LIMIT_HIGH_INCHES), max(0, target));
@@ -307,11 +331,11 @@ void SolarController::doModeSwitches() {
         setLat = gps->getLat();
         setLon = gps->getLon();
         Serial.print("Angle Offset: ");
-        Serial.println(ELEV_HOME_ANGLE - calcSunElev());
+        Serial.println(ELEV_HOME_ANGLE - (90 - calcSunElev()));
         Serial.println(stepper_elev->getAngle());
         Serial.println(ELEV_HOME_ANGLE - stepper_elev->getAngle());
         Serial.println(calcSunElev());
-        autoElevOffset = calcSunElev() - stepper_elev->getAngle();
+        autoElevOffset = (90 - calcSunElev()) - stepper_elev->getAngle();
         Serial.println(autoElevOffset);
         Serial.println(ELEV_HOME_ANGLE - calcSunElev() + autoElevOffset);
         for (int i=0; i<8; i++) {
@@ -620,4 +644,59 @@ void SolarController::resetDisplay() {
 	}
 }
 
+float SolarController::loadPIDP() {
+  pCoeff = readInt(SETTING_PID_P) / 10.0;
+  return pCoeff;
+}
+
+float SolarController::loadPIDI() {
+  iCoeff = readInt(SETTING_PID_I) / 10.0;
+  return iCoeff;
+}
+
+float SolarController::loadPIDD() {
+  dCoeff = readInt(SETTING_PID_D) / 10.0;
+  return dCoeff;
+}
+
+float SolarController::loadPIDInputCutoff() {
+  inputCutoff = readInt(SETTING_PID_INPUT_CUTOFF) / 10.0;
+  BiQuadNewLpf(inputCutoff, &inputFilter, 1.0 / MAIN_LOOP_FREQ);
+  BiQuadReset(&inputFilter);
+  return inputCutoff;
+}
+
+float SolarController::loadPIDDCutoff() {
+  dCutoff = readInt(SETTING_PID_D_CUTOFF) / 100.0;
+  BiQuadNewLpf(dCutoff, &dFilter, 1.0 / MAIN_LOOP_FREQ);
+  BiQuadReset(&dFilter);
+  return dCutoff;
+}
+
+void SolarController::savePIDP(float value) {
+  pCoeff = value;
+  saveInt(SETTING_PID_P, value * 10.0);  
+}
+
+void SolarController::savePIDI(float value) {
+  iCoeff = value;
+  saveInt(SETTING_PID_I, value * 10.0);  
+}
+
+void SolarController::savePIDD(float value) {
+  dCoeff = value;
+  saveInt(SETTING_PID_D, value * 10.0);  
+}
+
+void SolarController::savePIDInputCutoff(float value) {
+  inputCutoff = value;
+  BiQuadNewLpf(inputCutoff, &inputFilter, 1.0 / MAIN_LOOP_FREQ);
+  saveInt(SETTING_PID_INPUT_CUTOFF, value * 10.0);  
+}
+
+void SolarController::savePIDDCutoff(float value) {
+  dCutoff = value;
+  BiQuadNewLpf(dCutoff, &dFilter, 1.0 / MAIN_LOOP_FREQ);
+  saveInt(SETTING_PID_D_CUTOFF, value * 100.0);  
+}
 

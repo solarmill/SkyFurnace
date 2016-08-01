@@ -11,13 +11,14 @@ void DataLink::setValue(int i, int value) {
 
 void DataLink::send() {
   sp->print(encode(values));
+  //Serial.print(encode(values)); // for debugging
 }
 
 String DataLink::encode(int data[]) {
   String output = "[";
-  for (int i=0; i<8; i++) {
+  for (int i=0; i<DATALINK_NUM_VALUES; i++) {
     output += data[i];
-    if (i < 7) output += ",";
+    if (i < (DATALINK_NUM_VALUES - 1)) output += ",";
   }
   output += "]\n";
   return output;
